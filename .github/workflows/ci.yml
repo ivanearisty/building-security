@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  RECORDER_IMAGE: ghcr.io/${{ github.repository_owner }}/building-security-recorder
+  API_IMAGE: ghcr.io/${{ github.repository_owner }}/building-security-api
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check web-api/auth.py
+
+  build-and-push:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - context: ./recorder
+            image_env: RECORDER_IMAGE
+          - context: ./web-api
+            image_env: API_IMAGE
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          tags: |
+            ${{ matrix.image_env == 'RECORDER_IMAGE' && env.RECORDER_IMAGE || env.API_IMAGE }}:latest
+            ${{ matrix.image_env == 'RECORDER_IMAGE' && env.RECORDER_IMAGE || env.API_IMAGE }}:${{ github.sha }}

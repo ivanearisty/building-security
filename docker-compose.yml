@@ -1,0 +1,25 @@
+services:
+  security-recorder:
+    build: ./recorder
+    restart: unless-stopped
+    volumes:
+      - security_recordings:/recordings
+    env_file:
+      - .env
+
+  security-api:
+    build: ./web-api
+    restart: unless-stopped
+    ports:
+      - "8443:80"
+    volumes:
+      - security_recordings:/recordings:ro
+      - security_data:/data
+    env_file:
+      - .env
+    environment:
+      DEV_MODE: "true"
+
+volumes:
+  security_recordings:
+  security_data:
