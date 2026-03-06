@@ -16,11 +16,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - run: pip install ruff
       - run: ruff check web-api/auth.py
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: cd web && pnpm install --frozen-lockfile
+      - run: cd web && pnpm lint
 
   build-and-push:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -52,3 +64,31 @@ jobs:
           tags: |
             ${{ matrix.image_env == 'RECORDER_IMAGE' && env.RECORDER_IMAGE || env.API_IMAGE }}:latest
             ${{ matrix.image_env == 'RECORDER_IMAGE' && env.RECORDER_IMAGE || env.API_IMAGE }}:${{ github.sha }}
+
+  deploy-web:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - run: cd web && pnpm install --frozen-lockfile
+      - run: cd web && pnpm build
+        env:
+          VITE_API_URL: https://kosciuszko.suape.net
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy dist/ --project-name=building-security
+          workingDirectory: web
