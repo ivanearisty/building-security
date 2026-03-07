@@ -84,7 +84,7 @@ jobs:
       - run: cd web && pnpm install --frozen-lockfile
       - run: cd web && pnpm build
         env:
-          VITE_API_URL: https://kosciuszko.suape.net
+          VITE_API_URL: https://bldg-api-7f2k.suape.net
 
       - uses: cloudflare/wrangler-action@v3
         with:

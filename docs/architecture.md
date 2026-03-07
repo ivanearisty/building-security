@@ -20,8 +20,8 @@ Tapo C110 ──RTSP──▶ security-recorder ──writes──▶ /recording
               Cloudflare
               ┌───┴───┐
               │       │
-         Pages CDN   kosciuszko.suape.net
-         (frontend)  (API + video proxy)
+    kosciuszko.suape.net   bldg-api-7f2k.suape.net
+       (Pages CDN)          (API tunnel)
               │       │
               ▼       ▼
           Resident browser
@@ -113,7 +113,7 @@ Deployed automatically to Cloudflare Pages on push to `main`.
 
 ### 4. cloudflared (Docker container on TrueNAS)
 
-Runs the Cloudflare Tunnel that routes `kosciuszko.suape.net` to
+Runs the Cloudflare Tunnel that routes `bldg-api-7f2k.suape.net` to
 `localhost:8443`. No ports are open on the TrueNAS host — all traffic
 flows through the tunnel. Cloudflare provides DDoS protection on the
 free tier.
@@ -122,7 +122,7 @@ free tier.
 
 **`homelab-infra/terraform/`** manages:
 - The Cloudflare Tunnel
-- DNS CNAME records (`kosciuszko.suape.net` → tunnel)
+- DNS CNAME records (`bldg-api-7f2k.suape.net` → tunnel)
 - Ingress routing (subdomain → local port)
 
 **`homelab-infra/docker-compose.yml`** runs all containers on TrueNAS.
@@ -158,7 +158,7 @@ The thief may be a resident with legitimate access. Defense in depth:
 
 ### Live viewing
 1. Resident opens frontend → logs in → gets JWT
-2. Selects today's date → frontend loads `https://kosciuszko.suape.net/recordings/2026-03-06/playlist.m3u8`
+2. Selects today's date → frontend loads `https://bldg-api-7f2k.suape.net/recordings/2026-03-06/playlist.m3u8`
 3. hls.js sends `Authorization: Bearer <jwt>` with each request
 4. nginx validates JWT via `auth_request` to FastAPI → serves .m3u8/.ts files
 5. Video plays with ~10s delay (HLS segment duration)

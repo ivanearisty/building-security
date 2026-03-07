@@ -8,3 +8,6 @@ node_modules/
 .next/
 dist/
 uv.lock
+
+# Internal docs with secrets/account details
+docs/cloudflare-setup.md
