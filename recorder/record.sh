@@ -15,7 +15,7 @@ if [ "$CAMERA_HOST" = "test" ] || [ -z "$CAMERA_HOST" ]; then
 else
     RTSP_URL="rtsp://${CAMERA_USERNAME}:${CAMERA_PASSWORD}@${CAMERA_HOST}:${CAMERA_PORT}/${CAMERA_STREAM_PATH}"
     echo "[recorder] Capturing from ${CAMERA_HOST}:${CAMERA_PORT}/${CAMERA_STREAM_PATH}"
-    INPUT_ARGS="-rtsp_transport tcp -timeout 10000000 -stimeout 10000000 -i ${RTSP_URL}"
+    INPUT_ARGS="-rtsp_transport tcp -timeout 10000000 -i ${RTSP_URL}"
 fi
 
 while true; do
