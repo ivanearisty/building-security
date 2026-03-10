@@ -59,6 +59,16 @@ export async function fetchDays(): Promise<string[]> {
   return data.days;
 }
 
+export interface SegmentsInfo {
+  segments: string[];
+  first: string | null;
+  last: string | null;
+}
+
+export async function fetchSegments(date: string): Promise<SegmentsInfo> {
+  return apiFetch(`/api/segments/${date}`);
+}
+
 export function getRecordingUrl(date: string): string {
   return `${API_URL}/recordings/${date}/playlist.m3u8`;
 }

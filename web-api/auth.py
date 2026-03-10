@@ -30,7 +30,7 @@ BCRYPT_ROUNDS = 12
 DB_PATH = Path(os.environ.get("DB_PATH", "/data/users.db"))
 AUDIT_LOG = Path(os.environ.get("AUDIT_LOG", "/data/audit.log"))
 RECORDINGS_DIR = Path(os.environ.get("RECORDINGS_DIR", "/recordings"))
-MAX_DOWNLOAD_SECONDS = 3600  # 1 hour max
+MAX_DOWNLOAD_SECONDS = 1800  # 30 minutes max
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -274,6 +274,33 @@ def list_days(request: Request, payload: dict = Depends(require_auth)):
     return {"days": days}
 
 
+@app.get("/api/segments/{date}")
+def list_segments(date: str, request: Request, payload: dict = Depends(require_auth)):
+    """Return segment timestamps for a given day, used by the timeline UI."""
+    ip = get_client_ip(request)
+    audit("list_segments", payload["sub"], ip, f"/api/segments/{date}")
+
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format")
+
+    day_dir = RECORDINGS_DIR / date
+    if not day_dir.exists() or not day_dir.is_dir():
+        return {"segments": [], "first": None, "last": None}
+
+    times: list[str] = []
+    for seg in sorted(day_dir.glob("segment_*.ts")):
+        ts = seg.stem.replace("segment_", "")  # HH-MM-SS
+        times.append(ts)
+
+    return {
+        "segments": times,
+        "first": times[0] if times else None,
+        "last": times[-1] if times else None,
+    }
+
+
 @app.get("/api/download")
 def download_clip(
     date: str,
@@ -303,7 +330,7 @@ def download_clip(
 
     duration = (end_time - start_time).total_seconds()
     if duration > MAX_DOWNLOAD_SECONDS:
-        raise HTTPException(status_code=400, detail="Max download duration is 1 hour")
+        raise HTTPException(status_code=400, detail=f"Max download duration is {MAX_DOWNLOAD_SECONDS // 60} minutes")
 
     # Verify the date directory exists
     day_dir = RECORDINGS_DIR / date

@@ -99,6 +99,88 @@ video {
   border-radius: 4px;
 }
 
+/* Timeline */
+.timeline {
+  margin-top: 12px;
+  user-select: none;
+}
+
+.timeline-labels {
+  position: relative;
+  height: 16px;
+  font-size: 11px;
+  color: #888;
+}
+
+.timeline-labels span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+
+.timeline-bar {
+  position: relative;
+  height: 32px;
+  background: #1a1a1a;
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.timeline-slot {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: transparent;
+}
+
+.timeline-slot.has-data {
+  background: #2a5a2a;
+}
+
+.timeline-selection {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: rgba(100, 160, 255, 0.25);
+  border-left: 2px solid #68f;
+  border-right: 2px solid #68f;
+  pointer-events: none;
+}
+
+.timeline-handle {
+  position: absolute;
+  top: 0;
+  width: 12px;
+  height: 100%;
+  transform: translateX(-50%);
+  cursor: ew-resize;
+  z-index: 2;
+}
+
+.timeline-handle::after {
+  content: "";
+  position: absolute;
+  top: 25%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 50%;
+  background: #68f;
+  border-radius: 2px;
+}
+
+.coverage-info {
+  font-size: 12px;
+  color: #888;
+  margin-left: 12px;
+}
+
+.coverage-info.dim {
+  color: #555;
+}
+
+/* Download */
 .download {
   display: flex;
   align-items: center;
@@ -111,6 +193,15 @@ video {
 .download input[type="time"] {
   width: 110px;
   margin-left: 4px;
+}
+
+.dl-duration {
+  font-size: 12px;
+  color: #888;
+}
+
+.dl-duration:has(+ button:disabled) {
+  color: #f66;
 }
 
 .dl-status {
