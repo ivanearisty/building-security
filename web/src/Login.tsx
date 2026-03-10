@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { login } from "./api";
+import { login } from "./api-client";
 
 export function Login({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState("");

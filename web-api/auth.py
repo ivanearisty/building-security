@@ -277,11 +277,13 @@ def list_days(request: Request, payload: dict = Depends(require_auth)):
 @app.get("/api/segments/{date}")
 def list_segments(date: str, request: Request, payload: dict = Depends(require_auth)):
     """Return segment timestamps for a given day, used by the timeline UI."""
+    from fastapi.responses import JSONResponse
+
     ip = get_client_ip(request)
     audit("list_segments", payload["sub"], ip, f"/api/segments/{date}")
 
     try:
-        datetime.strptime(date, "%Y-%m-%d")
+        parsed_date = datetime.strptime(date, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format")
 
@@ -294,11 +296,20 @@ def list_segments(date: str, request: Request, payload: dict = Depends(require_a
         ts = seg.stem.replace("segment_", "")  # HH-MM-SS
         times.append(ts)
 
-    return {
+    body = {
         "segments": times,
         "first": times[0] if times else None,
         "last": times[-1] if times else None,
     }
+
+    # Past days are immutable — cache aggressively to avoid re-fetching
+    today = datetime.now(timezone.utc).date()
+    if parsed_date < today:
+        cache = "public, max-age=86400, immutable"  # 24h, won't change
+    else:
+        cache = "public, max-age=30"  # today — refresh every 30s
+
+    return JSONResponse(content=body, headers={"Cache-Control": cache})
 
 
 @app.get("/api/download")

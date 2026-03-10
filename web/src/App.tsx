@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getToken, clearToken, checkAuth } from "./api";
+import { getToken, clearToken, checkAuth } from "./api-client";
 import { Login } from "./Login";
 import { Player } from "./Player";
 

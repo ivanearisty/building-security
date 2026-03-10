@@ -1,29 +1,24 @@
-import { useEffect, useRef, useState, useMemo } from "react";
-import Hls from "hls.js";
-import { fetchDays, fetchSegments, getToken, getRecordingUrl, downloadClip } from "./api";
-import type { SegmentsInfo } from "./api";
+import { useEffect, useRef, useState, useMemo, useCallback } from "react";
+import { fetchDays, fetchSegments, fetchClip, saveClip } from "./api-client";
+import type { SegmentsInfo } from "./api-client";
 
 const MAX_DOWNLOAD_MINUTES = 30;
 
-/** Convert "HH-MM-SS" to total seconds since midnight */
 function hmsToSeconds(hms: string): number {
   const [h, m, s] = hms.split("-").map(Number);
   return h * 3600 + m * 60 + s;
 }
 
-/** Convert total seconds to "HH:MM" for display */
 function secondsToHM(sec: number): string {
   const h = Math.floor(sec / 3600);
   const m = Math.floor((sec % 3600) / 60);
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
 
-/** Convert "HH:MM" input value to "HH-MM-SS" for API */
 function inputToApi(val: string): string {
   return val.replace(":", "-") + "-00";
 }
 
-/** Build coverage buckets: for each 10-min slot (144 total), is there a segment? */
 function buildCoverage(segments: string[]): boolean[] {
   const slots = new Array<boolean>(144).fill(false);
   for (const ts of segments) {
@@ -36,28 +31,27 @@ function buildCoverage(segments: string[]): boolean[] {
 
 function Timeline({
   segments,
-  dlStart,
-  dlEnd,
+  rangeStart,
+  rangeEnd,
   onRangeChange,
 }: {
   segments: SegmentsInfo;
-  dlStart: string;
-  dlEnd: string;
+  rangeStart: string;
+  rangeEnd: string;
   onRangeChange: (start: string, end: string) => void;
 }) {
   const coverage = useMemo(() => buildCoverage(segments.segments), [segments.segments]);
   const barRef = useRef<HTMLDivElement>(null);
   const dragging = useRef<"start" | "end" | null>(null);
 
-  const startSec = hmsToSeconds(inputToApi(dlStart));
-  const endSec = hmsToSeconds(inputToApi(dlEnd));
+  const startSec = hmsToSeconds(inputToApi(rangeStart));
+  const endSec = hmsToSeconds(inputToApi(rangeEnd));
   const startPct = (startSec / 86400) * 100;
   const endPct = (endSec / 86400) * 100;
 
   function pctToTime(pct: number): string {
     const sec = Math.round((pct / 100) * 86400);
     const clamped = Math.max(0, Math.min(86400 - 60, sec));
-    // Snap to 5-min increments
     const snapped = Math.round(clamped / 300) * 300;
     return secondsToHM(snapped);
   }
@@ -65,8 +59,7 @@ function Timeline({
   function handlePointer(e: React.PointerEvent, type: "start" | "end") {
     e.preventDefault();
     dragging.current = type;
-    const el = barRef.current!;
-    el.setPointerCapture(e.pointerId);
+    barRef.current!.setPointerCapture(e.pointerId);
   }
 
   function handleMove(e: React.PointerEvent) {
@@ -75,9 +68,9 @@ function Timeline({
     const pct = Math.max(0, Math.min(100, ((e.clientX - rect.left) / rect.width) * 100));
     const time = pctToTime(pct);
     if (dragging.current === "start") {
-      onRangeChange(time, dlEnd);
+      onRangeChange(time, rangeEnd);
     } else {
-      onRangeChange(dlStart, time);
+      onRangeChange(rangeStart, time);
     }
   }
 
@@ -85,7 +78,6 @@ function Timeline({
     dragging.current = null;
   }
 
-  // Hour labels
   const hours = [0, 3, 6, 9, 12, 15, 18, 21];
 
   return (
@@ -111,12 +103,10 @@ function Timeline({
             style={{ left: `${(i / 144) * 100}%`, width: `${100 / 144}%` }}
           />
         ))}
-        {/* Selection overlay */}
         <div
           className="timeline-selection"
           style={{ left: `${startPct}%`, width: `${Math.max(0, endPct - startPct)}%` }}
         />
-        {/* Drag handles */}
         <div
           className="timeline-handle"
           style={{ left: `${startPct}%` }}
@@ -128,6 +118,10 @@ function Timeline({
           onPointerDown={(e) => handlePointer(e, "end")}
         />
       </div>
+      <div className="timeline-range-label">
+        <span>{rangeStart}</span>
+        <span>{rangeEnd}</span>
+      </div>
     </div>
   );
 }
@@ -136,11 +130,14 @@ export function Player({ onLogout }: { onLogout: () => void }) {
   const [days, setDays] = useState<string[]>([]);
   const [selectedDay, setSelectedDay] = useState("");
   const [segments, setSegments] = useState<SegmentsInfo>({ segments: [], first: null, last: null });
-  const [dlStart, setDlStart] = useState("00:00");
-  const [dlEnd, setDlEnd] = useState("00:30");
-  const [dlStatus, setDlStatus] = useState("");
+  const [rangeStart, setRangeStart] = useState("00:00");
+  const [rangeEnd, setRangeEnd] = useState("00:30");
+  const [clipUrl, setClipUrl] = useState<string | null>(null);
+  const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const hlsRef = useRef<Hls | null>(null);
+  // In-memory cache: avoids re-fetching segment lists when switching between days
+  const segmentCache = useRef<Map<string, SegmentsInfo>>(new Map());
 
   useEffect(() => {
     fetchDays().then((d) => {
@@ -151,69 +148,71 @@ export function Player({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     if (!selectedDay) return;
+    revokeClip();
 
-    // Load segments for timeline
-    fetchSegments(selectedDay).then((info) => {
-      setSegments(info);
-      if (info.first) {
-        const firstHM = info.first.slice(0, 5).replace("-", ":");
-        setDlStart(firstHM);
-        // Default end = first + 30 min, clamped to last segment
-        const firstSec = hmsToSeconds(info.first);
-        const endSec = Math.min(firstSec + MAX_DOWNLOAD_MINUTES * 60, info.last ? hmsToSeconds(info.last) : firstSec + 1800);
-        setDlEnd(secondsToHM(endSec));
-      }
-    });
-
-    // Load HLS stream
-    if (!videoRef.current) return;
-    if (hlsRef.current) hlsRef.current.destroy();
-
-    const url = getRecordingUrl(selectedDay);
-
-    if (Hls.isSupported()) {
-      const hls = new Hls({
-        xhrSetup: (xhr) => {
-          const token = getToken();
-          if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
-        },
-      });
-      hls.loadSource(url);
-      hls.attachMedia(videoRef.current);
-      hlsRef.current = hls;
-    } else if (videoRef.current.canPlayType("application/vnd.apple.mpegurl")) {
-      videoRef.current.src = url;
+    const cached = segmentCache.current.get(selectedDay);
+    if (cached) {
+      applySegments(cached);
+      return;
     }
 
-    return () => {
-      if (hlsRef.current) {
-        hlsRef.current.destroy();
-        hlsRef.current = null;
-      }
-    };
+    fetchSegments(selectedDay).then((info) => {
+      segmentCache.current.set(selectedDay, info);
+      applySegments(info);
+    });
   }, [selectedDay]);
 
-  // Compute download duration for validation
-  const dlStartSec = hmsToSeconds(inputToApi(dlStart));
-  const dlEndSec = hmsToSeconds(inputToApi(dlEnd));
-  const dlDuration = dlEndSec - dlStartSec;
-  const dlTooLong = dlDuration > MAX_DOWNLOAD_MINUTES * 60;
-  const dlInvalid = dlEndSec <= dlStartSec;
-
-  function handleRangeChange(start: string, end: string) {
-    setDlStart(start);
-    setDlEnd(end);
+  function applySegments(info: SegmentsInfo) {
+    setSegments(info);
+    if (info.first) {
+      const firstHM = info.first.slice(0, 5).replace("-", ":");
+      setRangeStart(firstHM);
+      const firstSec = hmsToSeconds(info.first);
+      const endSec = Math.min(
+        firstSec + MAX_DOWNLOAD_MINUTES * 60,
+        info.last ? hmsToSeconds(info.last) : firstSec + 1800
+      );
+      setRangeEnd(secondsToHM(endSec));
+    }
   }
 
-  async function handleDownload() {
-    if (!selectedDay || dlInvalid || dlTooLong) return;
-    setDlStatus("Downloading...");
-    try {
-      await downloadClip(selectedDay, inputToApi(dlStart), inputToApi(dlEnd));
-      setDlStatus("Done");
-    } catch (err) {
-      setDlStatus(err instanceof Error ? err.message : "Download failed");
+  function revokeClip() {
+    if (clipUrl) {
+      URL.revokeObjectURL(clipUrl);
+      setClipUrl(null);
     }
+    setStatus("");
+  }
+
+  const startSec = hmsToSeconds(inputToApi(rangeStart));
+  const endSec = hmsToSeconds(inputToApi(rangeEnd));
+  const duration = endSec - startSec;
+  const tooLong = duration > MAX_DOWNLOAD_MINUTES * 60;
+  const invalid = endSec <= startSec;
+
+  const loadClip = useCallback(async () => {
+    if (!selectedDay || invalid || tooLong) return;
+    revokeClip();
+    setLoading(true);
+    setStatus("Loading clip...");
+    try {
+      const url = await fetchClip(selectedDay, inputToApi(rangeStart), inputToApi(rangeEnd));
+      setClipUrl(url);
+      setStatus("");
+      if (videoRef.current) {
+        videoRef.current.src = url;
+        videoRef.current.load();
+      }
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : "Failed to load clip");
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedDay, rangeStart, rangeEnd, invalid, tooLong]);
+
+  function handleSave() {
+    if (!clipUrl) return;
+    saveClip(clipUrl, `recording_${selectedDay}_${inputToApi(rangeStart)}_to_${inputToApi(rangeEnd)}.mp4`);
   }
 
   const hasSegments = segments.segments.length > 0;
@@ -227,11 +226,8 @@ export function Player({ onLogout }: { onLogout: () => void }) {
 
       <div className="controls">
         <label>
-          Date:
-          <select
-            value={selectedDay}
-            onChange={(e) => setSelectedDay(e.target.value)}
-          >
+          Date
+          <select value={selectedDay} onChange={(e) => setSelectedDay(e.target.value)}>
             {days.map((d) => (
               <option key={d} value={d}>{d}</option>
             ))}
@@ -240,7 +236,6 @@ export function Player({ onLogout }: { onLogout: () => void }) {
         {hasSegments && segments.first && segments.last && (
           <span className="coverage-info">
             {segments.first.replace(/-/g, ":")} – {segments.last.replace(/-/g, ":")}
-            {" "}({segments.segments.length} segments)
           </span>
         )}
         {!hasSegments && selectedDay && (
@@ -248,45 +243,59 @@ export function Player({ onLogout }: { onLogout: () => void }) {
         )}
       </div>
 
-      <video ref={videoRef} controls playsInline />
+      <div className="video-wrap">
+        <video ref={videoRef} controls playsInline />
+        {!clipUrl && !loading && (
+          <div className="video-placeholder">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <path d="M8 21h8M12 17v4" />
+            </svg>
+            <span>Select a time range and load clip</span>
+          </div>
+        )}
+        {loading && (
+          <div className="video-placeholder">
+            <span>Loading clip...</span>
+          </div>
+        )}
+      </div>
 
       {hasSegments && (
         <>
           <Timeline
             segments={segments}
-            dlStart={dlStart}
-            dlEnd={dlEnd}
-            onRangeChange={handleRangeChange}
+            rangeStart={rangeStart}
+            rangeEnd={rangeEnd}
+            onRangeChange={(s, e) => { setRangeStart(s); setRangeEnd(e); }}
           />
 
-          <div className="download">
-            <label>
-              From:
-              <input
-                type="time"
-                value={dlStart}
-                onChange={(e) => setDlStart(e.target.value)}
-              />
-            </label>
-            <label>
-              To:
-              <input
-                type="time"
-                value={dlEnd}
-                onChange={(e) => setDlEnd(e.target.value)}
-              />
-            </label>
-            <span className="dl-duration">
-              {dlInvalid
-                ? "Invalid range"
-                : dlTooLong
-                  ? `${Math.round(dlDuration / 60)}min (max ${MAX_DOWNLOAD_MINUTES})`
-                  : `${Math.round(dlDuration / 60)}min`}
-            </span>
-            <button onClick={handleDownload} disabled={dlInvalid || dlTooLong}>
-              Download clip
-            </button>
-            {dlStatus && <span className="dl-status">{dlStatus}</span>}
+          <div className="clip-controls">
+            <div className="time-inputs">
+              <label>
+                From
+                <input type="time" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} />
+              </label>
+              <span className="separator">–</span>
+              <label>
+                To
+                <input type="time" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} />
+              </label>
+              <span className={`dl-duration${invalid || tooLong ? " invalid" : ""}`}>
+                {invalid ? "Invalid" : tooLong ? `${Math.round(duration / 60)}m / ${MAX_DOWNLOAD_MINUTES}m max` : `${Math.round(duration / 60)}m`}
+              </span>
+            </div>
+
+            <div className="clip-actions">
+              <button className="primary" onClick={loadClip} disabled={invalid || tooLong || loading}>
+                {loading ? "Loading..." : "Load clip"}
+              </button>
+              {clipUrl && (
+                <button onClick={handleSave}>Save</button>
+              )}
+            </div>
+
+            {status && <span className={`dl-status${status.includes("ail") ? " error" : ""}`}>{status}</span>}
           </div>
         </>
       )}

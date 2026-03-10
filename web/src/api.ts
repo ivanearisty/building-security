@@ -69,11 +69,8 @@ export async function fetchSegments(date: string): Promise<SegmentsInfo> {
   return apiFetch(`/api/segments/${date}`);
 }
 
-export function getRecordingUrl(date: string): string {
-  return `${API_URL}/recordings/${date}/playlist.m3u8`;
-}
-
-export async function downloadClip(date: string, start: string, end: string): Promise<void> {
+/** Fetch a clip as a blob URL for playback. Caller must revoke when done. */
+export async function fetchClip(date: string, start: string, end: string): Promise<string> {
   const token = getToken();
   const res = await fetch(
     `${API_URL}/api/download?date=${date}&start=${start}&end=${end}`,
@@ -84,10 +81,13 @@ export async function downloadClip(date: string, start: string, end: string): Pr
     throw new Error(body.detail || "Download failed");
   }
   const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
+  return URL.createObjectURL(blob);
+}
+
+/** Save a blob URL to disk. */
+export function saveClip(blobUrl: string, filename: string): void {
   const a = document.createElement("a");
-  a.href = url;
-  a.download = `recording_${date}_${start}_to_${end}.mp4`;
+  a.href = blobUrl;
+  a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
 }
