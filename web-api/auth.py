@@ -303,7 +303,8 @@ def list_segments(date: str, request: Request, payload: dict = Depends(require_a
     }
 
     # Past days are immutable — cache aggressively to avoid re-fetching
-    today = datetime.now(timezone.utc).date()
+    # Use local time (TZ=America/New_York) to match recording directory dates
+    today = datetime.now().date()
     if parsed_date < today:
         cache = "public, max-age=86400, immutable"  # 24h, won't change
     else:

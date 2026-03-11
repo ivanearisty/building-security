@@ -1,6 +1,8 @@
 FROM alpine:3.19
 
-RUN apk add --no-cache ffmpeg
+RUN apk add --no-cache ffmpeg tzdata
+
+ENV TZ=America/New_York
 
 WORKDIR /app
 COPY record.sh cleanup.sh entrypoint.sh ./

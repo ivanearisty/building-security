@@ -4,6 +4,8 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends nginx ffmpeg && \
     rm -rf /var/lib/apt/lists/*
 
+ENV TZ=America/New_York
+
 WORKDIR /app
 
 COPY requirements.txt .

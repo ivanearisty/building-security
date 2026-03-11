@@ -19,7 +19,7 @@ else
 fi
 
 while true; do
-    TODAY=$(date -u +%Y-%m-%d)
+    TODAY=$(date +%Y-%m-%d)
     DAY_DIR="/recordings/${TODAY}"
     mkdir -p "$DAY_DIR"
 

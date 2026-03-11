@@ -6,6 +6,8 @@ services:
       - security_recordings:/recordings
     env_file:
       - .env
+    environment:
+      TZ: America/New_York
 
   security-api:
     build: ./web-api
@@ -19,6 +21,7 @@ services:
       - .env
     environment:
       DEV_MODE: "true"
+      TZ: America/New_York
 
 volumes:
   security_recordings:
